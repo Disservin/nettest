@@ -1,0 +1,91 @@
+name: Comment YAML Diff Links
+
+on:
+  pull_request:
+    paths:
+      - '*.yaml'
+      - '*.yml'
+    types: [opened, synchronize]
+
+jobs:
+  comment-diff-links:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed YAML files
+        id: changed-files
+        run: |
+          # Get the list of changed YAML files in root directory only
+          changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E '^[^/]+\.ya?ml$' || true)
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$changed_files" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with diff links
+        if: steps.changed-files.outputs.changed_files != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const baseSha = context.payload.pull_request.base.sha;
+            const headSha = context.payload.pull_request.head.sha;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            const changedFiles = `${{ steps.changed-files.outputs.changed_files }}`.trim().split('\n').filter(f => f);
+            
+            let body = '## 📄 YAML File Changes\n\n';
+            body += `**Base:** \`${baseSha}\`\n`;
+            body += `**Head:** \`${headSha}\`\n\n`;
+            
+            // Overall diff link
+            body += `### [View Full Diff](https://github.com/${owner}/${repo}/compare/${baseSha}...${headSha})\n\n`;
+            
+            // Per-file diff links
+            if (changedFiles.length > 0) {
+              body += '### Changed Files:\n';
+              for (const file of changedFiles) {
+                const fileDiffUrl = `https://github.com/${owner}/${repo}/blob/${headSha}/${file}`;
+                const fileCompareUrl = `https://github.com/${owner}/${repo}/compare/${baseSha}...${headSha}#diff-${Buffer.from(file).toString('base64').replace(/=+$/, '')}`;
+                body += `- **${file}**\n`;
+                body += `  - [View File @ ${headSha.substring(0, 7)}](${fileDiffUrl})\n`;
+                body += `  - [View Diff](${fileCompareUrl})\n`;
+              }
+            }
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: context.issue.number
+            });
+            
+            const existingComment = comments.find(c => 
+              c.user.login === 'github-actions[bot]' && 
+              c.body.includes('📄 YAML File Changes')
+            );
+            
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body
+              });
+              console.log('Updated existing comment');
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: context.issue.number,
+                body
+              });
+              console.log('Created new comment');
+            }
