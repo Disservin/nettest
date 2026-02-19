@@ -23,6 +23,9 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Install PyYAML
+        run: pip install pyyaml
+
       - name: Get changed YAML files and extract trainer/stockfish info
         id: changed-files
         run: |
