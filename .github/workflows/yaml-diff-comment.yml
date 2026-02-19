@@ -143,23 +143,16 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const baseSha = context.payload.pull_request.base.sha;
-            const headSha = context.payload.pull_request.head.sha;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            const changedFiles = `${{ steps.changed-files.outputs.changed_files }}`.trim().split(/\s+/).filter(f => f);
             const trainerChanges = JSON.parse(`${{ steps.changed-files.outputs.trainer_changes }}` || '[]');
             const stockfishChanges = JSON.parse(`${{ steps.changed-files.outputs.stockfish_changes }}` || '[]');
 
-            let body = '## 📄 YAML File Changes\n\n';
-            body += `**Base:** \`${baseSha}\`\n`;
-            body += `**Head:** \`${headSha}\`\n\n`;
+            if (trainerChanges.length === 0 && stockfishChanges.length === 0) return;
 
-            // Overall diff link
-            body += `### [View Full Diff](https://github.com/${owner}/${repo}/compare/${baseSha}...${headSha})\n\n`;
+            let body = '';
 
-            // Trainer diff section
             if (trainerChanges.length > 0) {
               body += '### 🧠 Trainer Changes (nnue-pytorch)\n';
               for (const change of trainerChanges) {
@@ -173,7 +166,6 @@ jobs:
               body += '\n';
             }
 
-            // Stockfish diff section
             if (stockfishChanges.length > 0) {
               body += '### ♟️ Stockfish Changes\n';
               for (const change of stockfishChanges) {
@@ -184,31 +176,17 @@ jobs:
                   body += `- **${change.file}** (${typeLabel}): New [${change.new_sha.substring(0, 7)}](https://github.com/${change.owner}/Stockfish/commit/${change.new_sha})\n`;
                 }
               }
-              body += '\n';
             }
 
-            // Per-file diff links
-            if (changedFiles.length > 0) {
-              body += '### Changed Files:\n';
-              for (const file of changedFiles) {
-                const fileDiffUrl = `https://github.com/${owner}/${repo}/blob/${headSha}/${file}`;
-                const fileCompareUrl = `https://github.com/${owner}/${repo}/compare/${baseSha}...${headSha}#diff-${Buffer.from(file).toString('base64').replace(/=+$/, '')}`;
-                body += `- **${file}**\n`;
-                body += `  - [View File @ ${headSha.substring(0, 7)}](${fileDiffUrl})\n`;
-                body += `  - [View Diff](${fileCompareUrl})\n`;
-              }
-            }
-
-            // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner,
               repo,
               issue_number: context.issue.number
             });
 
-            const existingComment = comments.find(c => 
-              c.user.login === 'github-actions[bot]' && 
-              c.body.includes('📄 YAML File Changes')
+            const existingComment = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              (c.body.includes('🧠 Trainer Changes') || c.body.includes('♟️ Stockfish Changes'))
             );
 
             if (existingComment) {
@@ -218,7 +196,6 @@ jobs:
                 comment_id: existingComment.id,
                 body
               });
-              console.log('Updated existing comment');
             } else {
               await github.rest.issues.createComment({
                 owner,
@@ -226,5 +203,4 @@ jobs:
                 issue_number: context.issue.number,
                 body
               });
-              console.log('Created new comment');
             }
