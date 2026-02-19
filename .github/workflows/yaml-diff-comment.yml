@@ -33,6 +33,7 @@ jobs:
           import json
           import subprocess
           import sys
+          import os
 
           # Get changed files
           result = subprocess.run(
