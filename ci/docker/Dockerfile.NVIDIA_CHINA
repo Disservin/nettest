@@ -1,0 +1,88 @@
+FROM egslingjun-registry.cn-wulanchabu.cr.aliyuncs.com/egslingjun/training-nv-pytorch:25.03-serverless
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Replace apt sources with a clean Aliyun mirror config
+RUN set -eux; \
+    unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; \
+    printf '%s\n' \
+      'Acquire::http::Proxy "false";' \
+      'Acquire::https::Proxy "false";' \
+      > /etc/apt/apt.conf.d/99no-proxy; \
+    . /etc/os-release; \
+    codename="${UBUNTU_CODENAME:-$VERSION_CODENAME}"; \
+    printf '%s\n' \
+      "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename} main restricted universe multiverse" \
+      "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-updates main restricted universe multiverse" \
+      "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-backports main restricted universe multiverse" \
+      "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-security main restricted universe multiverse" \
+      > /tmp/china.sources.list; \
+    apt-get \
+      -o Dir::Etc::sourcelist=/tmp/china.sources.list \
+      -o Dir::Etc::sourceparts="-" \
+      update; \
+    apt-get \
+      -o Dir::Etc::sourcelist=/tmp/china.sources.list \
+      -o Dir::Etc::sourceparts="-" \
+      install -y \
+        g++ \
+        git \
+        curl \
+        python3-venv \
+        zstd \
+        strace \
+        gdb \
+        python3-dbg \
+        linux-tools-common \
+        linux-tools-generic \
+        libboost-fiber-dev \
+        libtbb-dev \
+        autoconf \
+        cmake \
+        rclone; \
+    rm -rf /var/lib/apt/lists/*
+
+# Use Tsinghua PyPI mirror
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
+RUN set -eux; \
+    rm -f /root/.pip/pip.conf /etc/pip.conf /etc/xdg/pip/pip.conf || true; \
+    mkdir -p /root/.pip; \
+    printf '%s\n' \
+      '[global]' \
+      'index-url = https://pypi.tuna.tsinghua.edu.cn/simple' \
+      'trusted-host = pypi.tuna.tsinghua.edu.cn' \
+      > /root/.pip/pip.conf; \
+    pip config debug
+
+RUN pip install --no-cache-dir \
+    psutil asciimatics GPUtil "python-chess==0.31.4" matplotlib tensorboard \
+    numba "numpy<2.0" requests lightning tyro ranger21 schedulefree
+
+RUN pip install --no-cache-dir nevergrad
+RUN pip install --no-cache-dir "firecrest-executor>=0.3.1"
+RUN pip install --no-cache-dir huggingface_hub zstandard
+RUN pip install --no-cache-dir pybind11
+
+ENV CFLAGS="-fPIC"
+ENV CXXFLAGS="-fPIC"
+ENV EXTRA_CFLAGS="-fPIC"
+ENV EXTRA_CXXFLAGS="-fPIC"
+ENV TERARKDBROOT=/workspace/terarkdb/
+ENV CHESSDB_PATH=/workspace/cdb/chess-20251115/data
+ENV HF_ENDPOINT=https://hf-mirror.com
+
+# Keep git clone on github for now. If that is slow, switch to a mirror you know works in your env.
+#RUN cd /workspace/ && git clone https://github.com/noobpwnftw/terarkdb.git && \
+#    cd terarkdb && ./build.sh
+
+#RUN cd /workspace/ && git clone https://github.com/vondele/cdbdirect.git && \
+#    cd cdbdirect && \
+#    make -j TERARKDBROOT=$TERARKDBROOT CHESSDB_PATH=$CHESSDB_PATH && \
+#    pip install --no-cache-dir .
+
+COPY . /workspace/nettest/
+RUN cd /workspace/nettest/ && pip install --no-cache-dir -e .
+
+WORKDIR /workspace/
