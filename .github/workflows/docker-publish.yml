@@ -1,0 +1,91 @@
+name: Build And Push Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      dockerfile:
+        description: Dockerfile variant to build
+        required: true
+        default: ci/docker/Dockerfile.NVIDIA
+        type: choice
+        options:
+          - ci/docker/Dockerfile.NVIDIA
+          - ci/docker/Dockerfile.AMD
+      image_name:
+        description: Docker Hub repository name
+        required: true
+        default: nettest
+        type: string
+      image_tag:
+        description: Optional Docker tag override
+        required: false
+        type: string
+      num_procs:
+        description: Value passed to the NUM_PROCS build arg
+        required: true
+        default: "8"
+        type: string
+
+jobs:
+  docker-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DOCKERFILE_PATH: ${{ inputs.dockerfile }}
+      IMAGE_NAME: ${{ inputs.image_name }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      NUM_PROCS: ${{ inputs.num_procs }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set image coordinates
+        id: image
+        shell: bash
+        run: |
+          image_repo="${{ secrets.DOCKERHUB_USERNAME }}/${IMAGE_NAME}"
+          variant="$(basename "${DOCKERFILE_PATH}")"
+          variant="${variant#Dockerfile.}"
+          variant="$(printf '%s' "${variant}" | tr '[:upper:]' '[:lower:]')"
+
+          if [ -n "${IMAGE_TAG}" ]; then
+            version_tag="${IMAGE_TAG}"
+          else
+            version_tag="${variant}-${GITHUB_SHA::7}"
+          fi
+
+          {
+            printf 'image_repo=%s\n' "${image_repo}"
+            printf 'variant=%s\n' "${variant}"
+            printf 'version_tag=%s\n' "${version_tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.image_repo }}
+          tags: |
+            type=raw,value=${{ steps.image.outputs.version_tag }}
+            type=raw,value=${{ steps.image.outputs.variant }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE_PATH }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NUM_PROCS=${{ env.NUM_PROCS }}
