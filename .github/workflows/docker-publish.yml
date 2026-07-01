@@ -68,6 +68,7 @@ jobs:
 
   build:
     needs: prepare
+    if: ${{ matrix.arch != 'arm64' || inputs.dockerfile != 'ci/docker/Dockerfile.AMD' }}
     strategy:
       fail-fast: false
       matrix:
@@ -148,9 +149,15 @@ jobs:
           IMAGE_REPO: ${{ needs.prepare.outputs.image_repo }}
           VERSION_TAG: ${{ needs.prepare.outputs.version_tag }}
           VARIANT_TAG: ${{ needs.prepare.outputs.variant }}
+          DOCKERFILE_PATH: ${{ inputs.dockerfile }}
         run: |
+          sources=("${IMAGE_REPO}:${VERSION_TAG}-amd64")
+
+          if [ "${DOCKERFILE_PATH}" != "ci/docker/Dockerfile.AMD" ]; then
+            sources+=("${IMAGE_REPO}:${VERSION_TAG}-arm64")
+          fi
+
           docker buildx imagetools create \
             -t "${IMAGE_REPO}:${VERSION_TAG}" \
             -t "${IMAGE_REPO}:${VARIANT_TAG}" \
-            "${IMAGE_REPO}:${VERSION_TAG}-amd64" \
-            "${IMAGE_REPO}:${VERSION_TAG}-arm64"
+            "${sources[@]}"
