@@ -37,6 +37,8 @@ jobs:
     permissions:
       contents: read
     outputs:
+      build_matrix: ${{ steps.image.outputs.build_matrix }}
+      include_arm64: ${{ steps.image.outputs.include_arm64 }}
       image_repo: ${{ steps.image.outputs.image_repo }}
       variant: ${{ steps.image.outputs.variant }}
       version_tag: ${{ steps.image.outputs.version_tag }}
@@ -58,7 +60,18 @@ jobs:
           else
             version_tag="${variant}-${GITHUB_SHA::7}"
           fi
+
+          if [ "${DOCKERFILE_PATH}" = "ci/docker/Dockerfile.AMD" ]; then
+            include_arm64=false
+            build_matrix='{"include":[{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest"}]}'
+          else
+            include_arm64=true
+            build_matrix='{"include":[{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm"}]}'
+          fi
+
           {
+            printf 'build_matrix=%s\n' "${build_matrix}"
+            printf 'include_arm64=%s\n' "${include_arm64}"
             printf 'image_repo=%s\n' "${image_repo}"
             printf 'variant=%s\n' "${variant}"
             printf 'version_tag=%s\n' "${version_tag}"
@@ -67,14 +80,7 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJson(needs.prepare.outputs.build_matrix) }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -140,12 +146,18 @@ jobs:
       - name: Create multi-arch manifest
         shell: bash
         env:
+          INCLUDE_ARM64: ${{ needs.prepare.outputs.include_arm64 }}
           IMAGE_REPO: ${{ needs.prepare.outputs.image_repo }}
           VERSION_TAG: ${{ needs.prepare.outputs.version_tag }}
           VARIANT_TAG: ${{ needs.prepare.outputs.variant }}
         run: |
+          sources=("${IMAGE_REPO}:${VERSION_TAG}-amd64")
+
+          if [ "${INCLUDE_ARM64}" = "true" ]; then
+            sources+=("${IMAGE_REPO}:${VERSION_TAG}-arm64")
+          fi
+
           docker buildx imagetools create \
             -t "${IMAGE_REPO}:${VERSION_TAG}" \
             -t "${IMAGE_REPO}:${VARIANT_TAG}" \
-            "${IMAGE_REPO}:${VERSION_TAG}-amd64" \
-            "${IMAGE_REPO}:${VERSION_TAG}-arm64"
+            "${sources[@]}"
