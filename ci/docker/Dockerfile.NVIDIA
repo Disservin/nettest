@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir "firecrest-executor>=0.3.1"
 
 # enabler for hf downloads
 RUN pip install huggingface_hub zstandard hf_xet
+RUN env -u PIP_CONSTRAINT pip install -U "typer>=0.20"
 
 # for cdbdirect
 RUN pip install pybind11
