@@ -53,22 +53,18 @@ jobs:
           variant="$(basename "${DOCKERFILE_PATH}")"
           variant="${variant#Dockerfile.}"
           variant="$(printf '%s' "${variant}" | tr '[:upper:]' '[:lower:]')"
-
           if [ -n "${IMAGE_TAG}" ]; then
             version_tag="${IMAGE_TAG}"
           else
             version_tag="${variant}-${GITHUB_SHA::7}"
           fi
-
           {
             printf 'image_repo=%s\n' "${image_repo}"
             printf 'variant=%s\n' "${variant}"
             printf 'version_tag=%s\n' "${version_tag}"
           } >> "${GITHUB_OUTPUT}"
-
   build:
     needs: prepare
-    if: ${{ matrix.arch != 'arm64' || inputs.dockerfile != 'ci/docker/Dockerfile.AMD' }}
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +96,6 @@ jobs:
           sudo docker system prune --all --force --volumes || true
           sudo apt-get clean
           df -h
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -125,7 +120,6 @@ jobs:
           tags: ${{ needs.prepare.outputs.image_repo }}:${{ needs.prepare.outputs.version_tag }}-${{ matrix.arch }}
           build-args: |
             NUM_PROCS=${{ env.NUM_PROCS }}
-
   publish-manifest:
     needs:
       - prepare
@@ -149,15 +143,9 @@ jobs:
           IMAGE_REPO: ${{ needs.prepare.outputs.image_repo }}
           VERSION_TAG: ${{ needs.prepare.outputs.version_tag }}
           VARIANT_TAG: ${{ needs.prepare.outputs.variant }}
-          DOCKERFILE_PATH: ${{ inputs.dockerfile }}
         run: |
-          sources=("${IMAGE_REPO}:${VERSION_TAG}-amd64")
-
-          if [ "${DOCKERFILE_PATH}" != "ci/docker/Dockerfile.AMD" ]; then
-            sources+=("${IMAGE_REPO}:${VERSION_TAG}-arm64")
-          fi
-
           docker buildx imagetools create \
             -t "${IMAGE_REPO}:${VERSION_TAG}" \
             -t "${IMAGE_REPO}:${VARIANT_TAG}" \
-            "${sources[@]}"
+            "${IMAGE_REPO}:${VERSION_TAG}-amd64" \
+            "${IMAGE_REPO}:${VERSION_TAG}-arm64"
