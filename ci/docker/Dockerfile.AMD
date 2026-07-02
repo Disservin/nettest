@@ -26,13 +26,14 @@ RUN pip install --no-cache-dir "firecrest-executor>=0.3.1"
 
 # enabler for hf downloads
 RUN pip install --no-cache-dir huggingface_hub zstandard hf_xet
-RUN env -u PIP_CONSTRAINT pip install -U "typer>=0.20"
 
 # copy the current nettest sources to have them around
 COPY . /workspace/nettest/
 
 # pip install nettest (in editable mode)
 RUN cd /workspace/nettest/ && pip install -e .
+
+RUN env -u PIP_CONSTRAINT pip install -U "typer>=0.20"
 
 # note that the CI picks a different workdir (mounted by default in the workspace)
 WORKDIR /workspace/
