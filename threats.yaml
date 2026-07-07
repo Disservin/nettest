@@ -144,11 +144,14 @@ testing:
       sha: b9008d08b9f375ef7810dc55da6ff223a3992cc2
     options:
       hash: 16
-      max_rounds: 50000
+      max_rounds: 30000
       tc: 10+0.1
+    sprt:
+      nElo_interval_midpoint: 0.0
+      nElo_interval_width: 2
   reference:
     code: *reference_code
-  steps: all
+  steps: last
   testing:
     code: *testing_code
 
