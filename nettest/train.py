@@ -1,9 +1,18 @@
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import torch
 import time
-from .utils import execute, MyDumper, sha256sum, find_most_recent, supports_numactl, flatten_cmd, github_repo_url
+from .utils import (
+    execute,
+    MyDumper,
+    sha256sum,
+    find_most_recent,
+    supports_numactl,
+    flatten_cmd,
+    github_repo_url,
+)
 from .default_environment import get_default_environment
 import uuid
 import yaml
@@ -119,6 +128,60 @@ def seconds_to_ddhhmmss(total: int) -> str:
     return f"{dd:02d}:{hh:02d}:{mm:02d}:{ss:02d}"
 
 
+def gpu_numa_node(device: str):
+    """Find the host NUMA node nearest an NVIDIA GPU, if available."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "-i",
+                device,
+                "--query-gpu=pci.bus_id",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        domain, bus, slot = result.stdout.strip().split(":")
+        # nvidia-smi reports an eight-digit domain; sysfs uses four digits.
+        pci_address = f"{domain[-4:]}:{bus}:{slot}".lower()
+        node = int(
+            (Path("/sys/bus/pci/devices") / pci_address / "numa_node").read_text()
+        )
+        return node if node >= 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def available_numa_node(node: int) -> bool:
+    """Check whether the current job may use this node's CPUs and memory."""
+    try:
+        status = Path("/proc/self/status").read_text()
+        memory_list = next(
+            line.split(":", 1)[1].strip()
+            for line in status.splitlines()
+            if line.startswith("Mems_allowed_list:")
+        )
+        cpu_list = (
+            Path("/sys/devices/system/node") / f"node{node}" / "cpulist"
+        ).read_text()
+
+        def expand_ranges(value):
+            numbers = set()
+            for part in value.strip().split(","):
+                start, _, end = part.partition("-")
+                numbers.update(range(int(start), int(end or start) + 1))
+            return numbers
+
+        return node in expand_ranges(memory_list) and bool(
+            expand_ranges(cpu_list) & os.sched_getaffinity(0)
+        )
+    except (OSError, ValueError, StopIteration):
+        return False
+
+
 def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
     """
     Run the training recipe for this step
@@ -144,7 +207,7 @@ def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
         devices = environment["train"]["devices"]
         run_env["CUDA_VISIBLE_DEVICES"] = devices
     else:
-        devices = "0,"
+        devices = run_env.get("CUDA_VISIBLE_DEVICES", "0,")
 
     num_gpus = len([d for d in devices.split(",") if d.strip()])
     local_devices = "".join([f"{i}," for i in range(num_gpus)])
@@ -152,10 +215,26 @@ def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
     if nproc > 1:
         cmd = ["torchrun", f"--nproc-per-node={nproc}", "ddp_launcher.py", "train.py"]
     elif supports_numactl():
-        cpunodebind = environment["train"].get("cpunodebind", "0")
-        membind = environment["train"].get("membind", "0")
-        cmd = ["numactl", f"--cpunodebind={cpunodebind}", f"--membind={membind}"]
-        cmd += ["python", "-u", "train.py"]
+        train_config = environment.get("train", {})
+        if "cpunodebind" in train_config or "membind" in train_config:
+            numa_options = [
+                f"--{option}={train_config[option]}"
+                for option in ("cpunodebind", "membind")
+                if option in train_config
+            ]
+        else:
+            device = devices.split(",")[0].strip()
+            node = gpu_numa_node(device)
+            numa_options = (
+                [f"--cpunodebind={node}", f"--membind={node}"]
+                if node is not None and available_numa_node(node)
+                else []
+            )
+        cmd = (["numactl"] + numa_options if numa_options else []) + [
+            "python",
+            "-u",
+            "train.py",
+        ]
     else:
         cmd = ["python", "-u", "train.py"]
 
