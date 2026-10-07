@@ -3,7 +3,15 @@ from pathlib import Path
 import shutil
 import torch
 import time
-from .utils import execute, MyDumper, sha256sum, find_most_recent, supports_numactl, flatten_cmd, github_repo_url
+from .utils import (
+    execute,
+    MyDumper,
+    sha256sum,
+    find_most_recent,
+    supports_numactl,
+    flatten_cmd,
+    github_repo_url,
+)
 from .default_environment import get_default_environment
 import uuid
 import yaml
@@ -151,13 +159,8 @@ def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
     nproc = max(1, num_gpus)
     if nproc > 1:
         cmd = ["torchrun", f"--nproc-per-node={nproc}", "ddp_launcher.py", "train.py"]
-    elif supports_numactl():
-        cpunodebind = environment["train"].get("cpunodebind", "0")
-        membind = environment["train"].get("membind", "0")
-        cmd = ["numactl", f"--cpunodebind={cpunodebind}", f"--membind={membind}"]
-        cmd += ["python", "-u", "train.py"]
     else:
-        cmd = ["python", "-u", "train.py"]
+        cmd = ["torchrun", f"--nproc-per-node={nproc}", "train.py"]
 
     for binpack in run["binpacks"]:
         cmd.append(str(data_dir / binpack))
@@ -191,7 +194,9 @@ def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
 
     max_epochs = int(run["max_epochs"])
     cmd.append(f"--max_epochs={max_epochs}")
-    cmd.append(f"--network-save-period={run.get('network-save-period', min(max_epochs, 20))}")
+    cmd.append(
+        f"--network-save-period={run.get('network-save-period', min(max_epochs, 20))}"
+    )
     cmd.append("--save_top_k=1")
     cmd.append("--save_last_network=True")
 
