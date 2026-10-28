@@ -500,9 +500,12 @@ def run_cross_check_eval(environment, test, testing_sha, stockfish_testing):
     binpack = Path.cwd() / "data" / test["crosscheck"]["binpack"]
     assert binpack.exists(), f"Binpack {binpack} does not exist"
 
-    # TODO the trainer could be inserted automatically based on the step being tested.
-    assert "trainer" in test["crosscheck"], "crosscheck config must include trainer"
-    nnue_pytorch_dir = ensure_trainer(test["crosscheck"]["trainer"])
+    # the step's trainer, so that checkpoint and network serialize consistently
+    step_file = Path.cwd() / "scratch" / testing_sha / "step.yaml"
+    assert step_file.exists(), f"{step_file} does not exist"
+    with open(step_file) as f:
+        step = yaml.safe_load(f)
+    nnue_pytorch_dir = ensure_trainer(step["trainer"])
 
     # configure and run cross_check_eval
     # TODO: make device respect 'device'
@@ -597,6 +600,17 @@ def run_test(environment, test_config_sha, testing_sha):
     stockfish_testing = ensure_stockfish("testing", test)
     matecheck, classic_epd = ensure_matecheck()
 
+    # the converting job of this step uploaded the net as the single
+    # uploader; reference its permanent download URL
+    final_yaml_file = Path.cwd() / "scratch" / testing_sha / "final.yaml"
+    with open(final_yaml_file) as f:
+        final_info = yaml.safe_load(f)
+    if "artifact_url" in final_info:
+        download_url = final_info["artifact_url"]
+    else:
+        download_url = f"no stored URL for final step {testing_sha}"
+
+    print(f"Net download: {download_url}")
     run_cross_check_eval(environment, test, testing_sha, stockfish_testing)
 
     run_matecheck(
@@ -612,6 +626,7 @@ def run_test(environment, test_config_sha, testing_sha):
         stockfish_reference,
         stockfish_testing,
     )
+    print(f"Net download: {download_url}")
 
     # store as an artifact for this run
     artifact_dir = Path.cwd() / "cidir" / f"test_{test_config_sha}_result"

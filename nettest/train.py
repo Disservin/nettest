@@ -3,7 +3,16 @@ from pathlib import Path
 import shutil
 import torch
 import time
-from .utils import execute, MyDumper, sha256sum, find_most_recent, supports_numactl, flatten_cmd, github_repo_url
+from .utils import (
+    execute,
+    MyDumper,
+    sha256sum,
+    find_most_recent,
+    supports_numactl,
+    flatten_cmd,
+    github_repo_url,
+    net_url,
+)
 from .default_environment import get_default_environment
 import uuid
 import yaml
@@ -140,6 +149,10 @@ def run_trainer(environment, current_sha, previous_sha, run, nnue_pytorch_dir):
 
     # some architecture specific options
     run_env = os.environ.copy()
+    # torchrun warns and forces OMP_NUM_THREADS=1 for each process when the
+    # variable is unset; setting it explicitly (matching the value the trainer
+    # applies per rank anyway) avoids the warning
+    run_env.setdefault("OMP_NUM_THREADS", "1")
     if "train" in environment and "devices" in environment["train"]:
         devices = environment["train"]["devices"]
         run_env["CUDA_VISIBLE_DEVICES"] = devices
@@ -325,17 +338,26 @@ def run_conversion(environment, current_sha, convert, nnue_pytorch_dir):
     print(f"nnue available as {std_nnue}")
 
     # store as an artifact for this run
-    artifact_dir = Path.cwd() / "cidir" / f"step_{current_sha}"
+    cidir = Path.cwd() / "cidir"
+    if not cidir.is_dir():
+        raise RuntimeError(
+            f"The CI checkout directory {cidir} is unavailable - the runner "
+            "slot was likely recycled during this job."
+        )
+    artifact_dir = cidir / f"step_{current_sha}"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     artifact_nnue = artifact_dir / short_nnue
     shutil.copy(nnue, artifact_nnue)
     print(f"nnue available as artifact step_{current_sha}")
 
     final_file = Path.cwd() / "scratch" / current_sha / "final.yaml"
+    artifact_url = net_url(current_sha, short_nnue)
+    print(f"Net download (live at job end): {artifact_url}")
     final = {
         "short_nnue": f"{short_nnue}",
         "std_nnue": f"{std_nnue}",
         "checkpoint": f"{checkpoint}",
+        "artifact_url": artifact_url,
     }
 
     with Path(final_file).open(mode="w", encoding="utf-8") as f:
