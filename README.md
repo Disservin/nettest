@@ -157,6 +157,12 @@ owner and repo is inferred from the data name:
 * [Linrock's training data](https://huggingface.co/datasets/linrock/)
 * [Vondele's data](https://huggingface.co/datasets/vondele/)
 
+Data can also be stored in a [huggingface bucket](https://huggingface.co/docs/hub/storage-buckets).
+In that case, prefix the data name with `buckets/`, i.e.
+`buckets/<owner>/<bucket>/<path/to/file.binpack>`. In both cases, a `.zst` or
+`.gz` compressed version of the file may be stored instead, which will be
+decompressed after download.
+
 Auxiliary tools used in this project include:
 
 * [nevergrad](https://github.com/FacebookResearch/Nevergrad)

@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 from collections import defaultdict
-from .utils import MyDumper, final_path
+from .utils import MyDumper, final_path, parse_data_name
 from .meta_recipe import expand_meta_recipe
 
 
@@ -244,9 +244,9 @@ def generate_ensure_data(recipe, ci_yaml_out, schedule):
                     binpacks.add(binpack)
 
     repos = defaultdict(list)
-    for binpack in binpacks:
-        owner, repo, filename = binpack.split("/", 2)
-        repos[(owner, repo)].append(filename)
+    for binpack in sorted(binpacks):
+        source, owner, repo, filename = parse_data_name(binpack)
+        repos[(source, owner, repo)].append(filename)
 
     # actual job script steps..
     job = generate_job_base()
@@ -254,11 +254,15 @@ def generate_ensure_data(recipe, ci_yaml_out, schedule):
     job["stage"] = "ensureData"
 
     job["script"] = ["cd /workspace", "ln -s $CI_PROJECT_DIR ./cidir"]
-    for (owner, repo), filenames in repos.items():
+    for (source, owner, repo), filenames in repos.items():
+        flag = "--bucket " if source == "bucket" else ""
         job["script"].append(
-            f"python -u -m nettest.ensure_data {owner} {repo} " + " ".join(filenames)
+            f"python -u -m nettest.ensure_data {flag}{owner} {repo} "
+            + " ".join(filenames)
         )
-        schedule["data"].append({"owner": owner, "repo": repo, "filenames": filenames})
+        schedule["data"].append(
+            {"owner": owner, "repo": repo, "filenames": filenames, "source": source}
+        )
 
     ci_yaml_out["ensureDataJob"] = job
     return

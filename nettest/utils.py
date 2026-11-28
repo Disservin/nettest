@@ -10,6 +10,32 @@ from functools import lru_cache
 from pathlib import Path
 
 
+# binpack names starting with this prefix live in a HF bucket instead of a
+# HF dataset repo, i.e. buckets/<owner>/<bucket>/<path/to/file>
+BUCKET_PREFIX = "buckets"
+
+
+def parse_data_name(name: str) -> tuple[str, str, str, str]:
+    """
+    Split a binpack name into (source, owner, repo, filename).
+
+    * ``owner/repo/path/file.binpack`` -> HF dataset repo
+    * ``buckets/owner/bucket/path/file.binpack`` -> HF bucket
+
+    The local copy always lives in ``cwd/data/<name>``.
+    """
+    parts = name.split("/")
+    if parts[0] == BUCKET_PREFIX:
+        if len(parts) < 4:
+            raise ValueError(
+                f"Invalid bucket data name {name}, expected {BUCKET_PREFIX}/owner/bucket/filename"
+            )
+        return "bucket", parts[1], parts[2], "/".join(parts[3:])
+    if len(parts) < 3:
+        raise ValueError(f"Invalid data name {name}, expected owner/repo/filename")
+    return "dataset", parts[0], parts[1], "/".join(parts[2:])
+
+
 def net_url(sha, net_name):
     """
     The direct download URL of a published net; it goes live when the job
